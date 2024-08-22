@@ -11,15 +11,23 @@ import (
 var (
 	marshal   = jsoniter.Marshal
 	unmarshal = jsoniter.Unmarshal
+
+	defaultRedisBroker = &redisBroker{
+		rc: redis.NewClient(&redis.Options{
+			Addr: "localhost:6379",
+		}),
+		queue: "tiny-celery-default",
+		tasks: map[string]Task{},
+	}
 )
 
-type RedisBroker struct {
+type redisBroker struct {
 	rc    *redis.Client
 	queue string
-	tasks map[string]TaskInterface
+	tasks map[string]Task
 }
 
-func (b *RedisBroker) send(ctx context.Context, messages ...*Message) error {
+func (b *redisBroker) send(ctx context.Context, messages ...*Message) error {
 	if len(messages) == 0 {
 		return nil
 	}
@@ -38,7 +46,7 @@ func (b *RedisBroker) send(ctx context.Context, messages ...*Message) error {
 	return err
 }
 
-func (b *RedisBroker) restore(ctx context.Context, messages ...*Message) error {
+func (b *redisBroker) restore(ctx context.Context, messages ...*Message) error {
 	if len(messages) == 0 {
 		return nil
 	}
@@ -57,7 +65,7 @@ func (b *RedisBroker) restore(ctx context.Context, messages ...*Message) error {
 	return err
 }
 
-func (b *RedisBroker) fetch(ctx context.Context) (*Message, error) {
+func (b *redisBroker) fetch(ctx context.Context) (*Message, error) {
 	res := b.rc.LPop(ctx, b.queue)
 	if err := res.Err(); err != nil {
 		if IsRedisNilErr(err) {
@@ -66,22 +74,20 @@ func (b *RedisBroker) fetch(ctx context.Context) (*Message, error) {
 		return nil, err
 	}
 	data := []byte(res.Val())
-	meta := Meta{}
-	if err := unmarshal(data, &meta); err != nil {
+	meta := &Meta{}
+	if err := unmarshal(data, meta); err != nil {
 		return nil, err
 	}
-	taskName := meta.TaskName
-	task, ok := b.tasks[taskName]
+	task, ok := b.tasks[meta.Name]
 	if !ok {
 		return nil, ErrTaskNotRegistered
 	}
 	message := &Message{
-		Meta: meta,
-		Task: reflect.New(reflect.TypeOf(task).Elem()).Interface().(TaskInterface),
+		Task: reflect.New(reflect.TypeOf(task).Elem()).Interface().(Task),
 	}
 	if err := unmarshal(data, message); err != nil {
 		return nil, err
 	}
-	message.SetDefault()
+	message.setDefault()
 	return message, nil
 }

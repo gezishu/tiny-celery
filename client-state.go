@@ -1,9 +1,9 @@
 package tinycelery
 
-type ClientState uint8
+type clientState uint8
 
 const (
-	ClientINIT ClientState = iota + 1
-	ClientRUNNING
-	ClientSTOPPED
+	clientINIT clientState = iota
+	clientRUNNING
+	clientSTOPPED
 )

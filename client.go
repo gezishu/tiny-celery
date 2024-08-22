@@ -3,6 +3,7 @@ package tinycelery
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -13,54 +14,42 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+type clientInitOption func(c *Client)
+
 type Client struct {
 	sync.Mutex
-	currency Currency
-	prefetch uint32
-	messages []*Message
-	broker   *RedisBroker
-	logger   *log.Logger
-	state    ClientState
+	concurrency *concurrency
+	prefetch    uint32
+	broker      *redisBroker
+	logger      *log.Logger
+	state       clientState
+	messages    []*Message
 }
 
 func NewClient() *Client {
 	return &Client{}
 }
 
-func (c *Client) setDefault() {
-	c.currency = Currency{
-		max:  defaultCurrency,
-		curr: 0,
-		C:    make(chan uint32, 1),
-	}
-	c.prefetch = defaultPrefetch
-	c.logger = log.New(os.Stdout, "[tiny-celery] ", log.Ltime)
-}
-
-func (c *Client) setState(state ClientState) {
+func (c *Client) setState(state clientState) {
 	c.Lock()
 	defer c.Unlock()
 	c.state = state
 }
 
-func (c *Client) Init(rc *redis.Client, initOptions ...initOption) (*Client, error) {
-	c.setDefault()
-	c.broker = &RedisBroker{
-		rc:    rc,
-		queue: "tiny-celery-default",
-		tasks: map[string]TaskInterface{},
+func (c *Client) Init(rc *redis.Client, options ...clientInitOption) (*Client, error) {
+	c.concurrency = defaultConcurrency
+	c.prefetch = defaultPrefetch
+	c.logger = log.New(os.Stdout, "[tiny-celery] ", log.Ltime)
+	c.broker = defaultRedisBroker
+	c.broker.rc = rc
+	for _, option := range options {
+		option(c)
 	}
-	for _, initOption := range initOptions {
-		err := initOption(c)
-		if err != nil {
-			return nil, err
-		}
-	}
-	c.messages = make([]*Message, c.currency.max+c.prefetch)
+	c.messages = make([]*Message, c.concurrency.max+c.prefetch)
 	return c, nil
 }
 
-func (c *Client) RegisterTask(task TaskInterface) error {
+func (c *Client) RegisterTask(task Task) error {
 	taskName := getType(task)
 	if _, registered := c.broker.tasks[taskName]; registered {
 		return ErrTaskHasRegistered
@@ -69,7 +58,7 @@ func (c *Client) RegisterTask(task TaskInterface) error {
 	return nil
 }
 
-func (c *Client) updateMessageByIndex(ctx context.Context, index int) error {
+func (c *Client) updateMessage(ctx context.Context, index int) error {
 	c.messages[index] = nil
 	message, err := c.broker.fetch(ctx)
 	if err != nil {
@@ -80,63 +69,49 @@ func (c *Client) updateMessageByIndex(ctx context.Context, index int) error {
 }
 
 func (c *Client) scanMessages(ctx context.Context) {
-	if c.state != ClientRUNNING {
+	if c.state != clientRUNNING {
 		return
-	}
-	for i := 0; i < len(c.messages); i++ {
-		if c.messages[i] == nil {
-			if err := c.updateMessageByIndex(ctx, i); err != nil {
-				if errors.Is(err, ErrMessageNotExists) {
-					break
-				} else {
-					c.logger.Printf("update message by index err: %v\n", err)
-				}
-				continue
-			}
-		}
 	}
 	for i := 0; i < len(c.messages); i++ {
 		message := c.messages[i]
 		if message == nil {
 			continue
 		}
-		switch message.taskState {
-		case StateINIT:
-			var runable = true
-			if !c.currency.prerequire() {
-				runable = false
+		switch message.Meta.state {
+		case taskINIT:
+			if !c.concurrency.require(true) {
+				break
 			}
-			if !runable {
+			if message.Meta.RateLimit.limited(ctx, c.broker.rc) {
 				continue
 			}
-			if message.TaskRateLimit.enable() {
-				message.TaskRateLimit.parse()
-				limited, err := message.TaskRateLimit.check(ctx, c.broker.rc)
-				if err != nil {
-					runable = false
-				} else if limited {
-					runable = false
-				}
-			}
-			if !runable {
-				continue
-			}
-			if c.currency.require() {
-				if err := message.SetTaskState(StateRUNNING); err != nil {
-					// 理论上不可达
-					panic(err)
+			if c.concurrency.require(false) {
+				if err := message.Meta.setState(taskRUNNING); err != nil {
+					panic(fmt.Errorf("unreach err: %v", err))
 				}
 				go c.runTask(ctx, message)
 			}
-		case StateSUCCEED:
-			c.updateMessageByIndex(ctx, i)
-		case StateFAILED:
+		case taskSUCCEED:
+			_ = c.updateMessage(ctx, i)
+		case taskFAILED:
 			// todo 增加重试逻辑
-			c.logger.Printf("task %s failed\n", message.taskRTName)
-			c.updateMessageByIndex(ctx, i)
-		case StateTIMEOUT:
-			c.updateMessageByIndex(ctx, i)
-			c.logger.Printf("task %s timeout\n", message.taskRTName)
+			c.logger.Printf("task %s failed\n", message.rtName)
+			_ = c.updateMessage(ctx, i)
+		case taskTIMEOUT:
+			_ = c.updateMessage(ctx, i)
+			c.logger.Printf("task %s timeout\n", message.rtName)
+		}
+	}
+	for i := 0; i < len(c.messages); i++ {
+		if c.messages[i] == nil {
+			if err := c.updateMessage(ctx, i); err != nil {
+				if errors.Is(err, ErrMessageNotExists) {
+					break
+				} else {
+					c.logger.Printf("update message err: %v\n", err)
+				}
+				continue
+			}
 		}
 	}
 
@@ -149,9 +124,10 @@ func (c *Client) restoreInitMessages(ctx context.Context) {
 		if message == nil {
 			continue
 		}
-		if message.taskState == StateINIT {
-			messages = append(messages, message)
+		if message.state != taskINIT {
+			continue
 		}
+		messages = append(messages, message)
 		c.messages[i] = nil
 	}
 	if err := c.broker.restore(ctx, messages...); err != nil {
@@ -162,45 +138,39 @@ func (c *Client) restoreInitMessages(ctx context.Context) {
 }
 
 func (c *Client) Start(ctx context.Context) error {
-	c.setState(ClientRUNNING)
-	ticker := time.NewTicker(time.Second * 3)
+	c.setState(clientRUNNING)
+	ticker := time.NewTicker(time.Second * 1)
 	stop := make(chan os.Signal)
-	signal.Notify(
-		stop,
-		syscall.SIGTERM,
-		syscall.SIGINT,
-	)
+	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT) //nolint:all
 	for {
 		select {
 		case <-stop:
 			signal.Stop(stop)
-			c.setState(ClientSTOPPED)
+			c.setState(clientSTOPPED)
 			c.restoreInitMessages(ctx)
+			return nil
 		case <-ticker.C:
 			c.scanMessages(ctx)
-		case <-c.currency.C:
-			c.scanMessages(ctx)
+		case n := <-c.concurrency.c:
+			if n < 0 {
+				c.scanMessages(ctx)
+			}
 		}
 	}
 }
 
-func (c *Client) Delay(ctx context.Context, tasks []TaskInterface, taskOptions ...TaskOption) error {
+func (c *Client) Delay(ctx context.Context, tasks []Task, options ...taskOption) error {
 	messages := make([]*Message, 0, len(tasks))
 	for _, task := range tasks {
-		meta := Meta{
-			TaskID:   genRandString(8),
-			TaskName: getType(task),
+		message := &Message{
+			Task: task,
 		}
-		meta.SetDefault()
-		for _, taskOption := range taskOptions {
-			err := taskOption(&meta)
+		message.setDefault()
+		for _, option := range options {
+			err := option(message.Meta)
 			if err != nil {
 				return err
 			}
-		}
-		message := &Message{
-			Meta: meta,
-			Task: task,
 		}
 		if err := c.runTaskHook(ctx, message, BeforeCreate); err != nil {
 			return err
@@ -211,19 +181,19 @@ func (c *Client) Delay(ctx context.Context, tasks []TaskInterface, taskOptions .
 }
 
 func (c *Client) runTask(ctx context.Context, message *Message) {
-	defer c.currency.release()
-	if state := message.taskState; state != StateRUNNING {
+	defer c.concurrency.release()
+	if state := message.state; state != taskRUNNING {
 		c.logger.Printf("invalid state %d, skip\n", state)
 		return
 	}
 	tsc := make(chan *TaskSignal, 1)
-	ctx, cancel := context.WithDeadline(ctx, getNow().Add(message.TaskTimeLimit))
+	ctx, cancel := context.WithDeadline(ctx, getNow().Add(message.TimeLimit))
 	defer cancel()
-	c.runTaskHook(ctx, message, BeforeExecute)
+	_ = c.runTaskHook(ctx, message, BeforeExecute)
 	go func(ctx context.Context, message *Message, tsc chan<- *TaskSignal) {
 		defer func() {
 			if err := recover(); err != nil {
-				tsc <- newTaskSignal(PANIC, err.(error).Error())
+				tsc <- newTaskSignal(PANIC, fmt.Sprintf("%v", err))
 			}
 		}()
 		tsc <- newTaskSignal(START, "")
@@ -234,39 +204,35 @@ func (c *Client) runTask(ctx context.Context, message *Message) {
 		}
 	}(ctx, message, tsc)
 
-	var taskState TaskState
+	var state taskState
 	var ticker = time.NewTicker(time.Millisecond * 100)
 label:
 	for {
 		select {
 		case <-ticker.C:
-			if c.state == ClientSTOPPED {
-				c.runTaskHook(ctx, message, BeforeProcessExit)
+			if c.state == clientSTOPPED {
+				_ = c.runTaskHook(ctx, message, BeforeProcessExit)
 				return
 			}
 		case <-ctx.Done():
-			taskState = StateTIMEOUT
-			c.runTaskHook(ctx, message, AfterTimeout)
+			state = taskTIMEOUT
+			_ = c.runTaskHook(ctx, message, AfterTimeout)
 			break label
 		case ts := <-tsc:
-			// c.logger.Printf("%s %s\n", message.rtName, ts)
 			switch ts.Type {
 			case DONE:
-				taskState = StateSUCCEED
-				c.runTaskHook(ctx, message, AfterSucceed)
+				state = taskSUCCEED
+				_ = c.runTaskHook(ctx, message, AfterSucceed)
 				break label
-			case ERROR:
-				c.runTaskHook(ctx, message, AfterFailed)
-				taskState = StateFAILED
-				break label
-			case PANIC:
-				c.runTaskHook(ctx, message, AfterFailed)
-				taskState = StateFAILED
+			case ERROR, PANIC:
+				_ = c.runTaskHook(ctx, message, AfterFailed)
+				state = taskFAILED
 				break label
 			}
 		}
 	}
-	if err := message.SetTaskState(taskState); err != nil {
+	err := message.Meta.setState(state)
+	if err != nil {
 		c.logger.Printf("set task state err: %v\n", err)
 	}
 }
@@ -282,7 +248,7 @@ func (c *Client) runTaskHook(ctx context.Context, message *Message, taskHook Tas
 		return nil
 	}
 	if err := f(ctx); err != nil {
-		c.logger.Printf("run %s hook %s err: %v\n", message.taskRTName, taskHook, err)
+		c.logger.Printf("run %s hook %s err: %v\n", message.rtName, taskHook, err)
 		return err
 	}
 	return nil

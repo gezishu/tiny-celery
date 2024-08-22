@@ -6,55 +6,37 @@ import (
 	"time"
 )
 
-const (
-	StateINIT TaskState = iota
-	StateRUNNING
-	StateSUCCEED
-	StateFAILED
-	StateTIMEOUT
-)
-
-var stateTransformMap = map[TaskState][]TaskState{
-	StateINIT:    {StateRUNNING},
-	StateRUNNING: {StateSUCCEED, StateFAILED, StateTIMEOUT},
-	StateFAILED:  {StateRUNNING},
-	StateTIMEOUT: {StateRUNNING},
-}
-
-type TaskState uint8
-
 type Meta struct {
-	TaskID        string
-	TaskName      string
-	TaskTimeLimit time.Duration
-	TaskRateLimit TaskRateLimit
-	mu            sync.Mutex `json:"-"`
-	taskState     TaskState  `json:"-"`
-	taskRTName    string     `json:"-"`
+	mu        sync.Mutex
+	ID        string        `json:"id"`
+	Name      string        `json:"name"`
+	TimeLimit time.Duration `json:"timelimit"`
+	RateLimit taskRateLimit `json:"ratelimit"`
+	state     taskState
+	rtName    string
 }
 
-func (m *Meta) SetTaskState(taskState TaskState) error {
+type taskOption func(m *Meta) error
+
+func (m *Meta) setState(targetState taskState) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	currState := m.taskState
-	for _, state := range stateTransformMap[currState] {
-		if state == taskState {
-			m.taskState = taskState
+	currState := m.state
+	for _, state := range taskStateTransformMap[currState] {
+		if state == targetState {
+			m.state = targetState
 			return nil
 		}
 	}
-	return fmt.Errorf("can't set task state from %v to %v", currState, taskState)
+	return fmt.Errorf("can't set task state from %v to %v", currState, targetState)
 }
 
-func (m *Meta) SetDefault() {
-	if m.TaskTimeLimit < time.Second {
-		m.TaskTimeLimit = defaultTaskTimeLimit
+func (m *Meta) setDefault() {
+	if m.ID == "" {
+		m.ID = genRandString(8)
 	}
-	if m.TaskRateLimit.Limit != "" {
-		if m.TaskRateLimit.Key == "" {
-			m.TaskRateLimit.Key = m.TaskName
-		}
+	if m.TimeLimit < minTaskTimeLimit {
+		m.TimeLimit = defaultTaskTimeLimit
 	}
-	m.taskState = StateINIT
-	m.taskRTName = fmt.Sprintf("%s[%s]", m.TaskName, genRandString(4))
+	m.state = taskINIT
 }
