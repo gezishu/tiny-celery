@@ -14,10 +14,12 @@ func WithConcurrency(concurrency uint32) clientInitOption {
 	}
 }
 
-var defaultConcurrency = &concurrency{
-	max: 1,
-	cur: 0,
-	c:   make(chan int, 10),
+func newDefaultConcurrency() *concurrency {
+	return &concurrency{
+		max: 1,
+		cur: 0,
+		c:   make(chan int, 10),
+	}
 }
 
 type concurrency struct {

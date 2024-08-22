@@ -41,10 +41,10 @@ func (c *Client) setState(state clientState) {
 }
 
 func (c *Client) Init(rc *redis.Client, queue string, options ...clientInitOption) (*Client, error) {
-	c.concurrency = defaultConcurrency
+	c.concurrency = newDefaultConcurrency()
 	c.prefetch = defaultPrefetch
 	c.logger = log.New(os.Stdout, "[tiny-celery] ", log.Ltime)
-	c.broker = defaultRedisBroker
+	c.broker = newDefaultRedisBroker()
 	c.broker.rc = rc
 	c.broker.queue = queue
 	for _, option := range options {

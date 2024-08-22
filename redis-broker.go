@@ -13,15 +13,17 @@ import (
 var (
 	marshal   = jsoniter.Marshal
 	unmarshal = jsoniter.Unmarshal
+)
 
-	defaultRedisBroker = &redisBroker{
+func newDefaultRedisBroker() *redisBroker {
+	return &redisBroker{
 		rc: redis.NewClient(&redis.Options{
 			Addr: "localhost:6379",
 		}),
 		queue: "tiny-celery-default",
 		tasks: map[string]Task{},
 	}
-)
+}
 
 type redisBroker struct {
 	rc    *redis.Client
