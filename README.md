@@ -2,17 +2,17 @@
 
 简单的分布式任务框架
 
-## 已知缺陷
-
-部分设置了rateLimit的任务会在最后执行 
-
 ## features:
 
-### 并发控制
+### concurrency
 
-### 预拉取
+### prefetch & restore
 
-### 任务钩子
+### task hook
 
-### 任务执行速率控制
+### rate limit
+
+### time limit
+
+### eta & countdown
 

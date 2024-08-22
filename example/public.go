@@ -7,6 +7,7 @@ import (
 
 var tasks = tinycelery.Tasks{
 	&TestBaseTask{},
+	&TestHookTask{},
 	&TestRateLimitTask{},
 }
 
@@ -18,9 +19,9 @@ var RedisClient = redis.NewClient(&redis.Options{
 func GetTinyCeleryClient() *tinycelery.Client {
 	client, err := tinycelery.NewClient().Init(
 		RedisClient,
+		"testqueue",
 		tinycelery.WithConcurrency(4),
 		tinycelery.WithPrefetch(4),
-		tinycelery.WithQueue("test"),
 	)
 	PanicIfError(err)
 	for _, task := range tasks {

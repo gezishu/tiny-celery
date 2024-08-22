@@ -12,16 +12,16 @@ func main() {
 	ctx := context.Background()
 	example.RedisClient.FlushAll(ctx)
 	client := example.GetTinyCeleryClient()
+
 	tasks := tinycelery.Tasks{}
-	for i := 0; i < 15; i++ {
-		tasks = append(tasks, &example.TestRateLimitTask{
+	for i := 0; i < 1000; i++ {
+		tasks = append(tasks, &example.TestBaseTask{
 			Desc: fmt.Sprintf("task %d", i),
 		})
 	}
 	example.PanicIfError(client.Delay(
 		ctx,
 		tasks,
-		tinycelery.WithRateLimit("1/1s", ""),
 	))
 	example.PanicIfError(client.Start(ctx))
 }

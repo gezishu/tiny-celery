@@ -30,18 +30,23 @@ func NewClient() *Client {
 	return &Client{}
 }
 
+func (c *Client) GetAccumulate(ctx context.Context) (uint32, error) {
+	return c.broker.getAccumulate(ctx)
+}
+
 func (c *Client) setState(state clientState) {
 	c.Lock()
 	defer c.Unlock()
 	c.state = state
 }
 
-func (c *Client) Init(rc *redis.Client, options ...clientInitOption) (*Client, error) {
+func (c *Client) Init(rc *redis.Client, queue string, options ...clientInitOption) (*Client, error) {
 	c.concurrency = defaultConcurrency
 	c.prefetch = defaultPrefetch
 	c.logger = log.New(os.Stdout, "[tiny-celery] ", log.Ltime)
 	c.broker = defaultRedisBroker
 	c.broker.rc = rc
+	c.broker.queue = queue
 	for _, option := range options {
 		option(c)
 	}
@@ -68,7 +73,7 @@ func (c *Client) updateMessage(ctx context.Context, index int) error {
 	return nil
 }
 
-func (c *Client) scanMessages(ctx context.Context) {
+func (c *Client) scan(ctx context.Context) {
 	if c.state != clientRUNNING {
 		return
 	}
@@ -79,6 +84,9 @@ func (c *Client) scanMessages(ctx context.Context) {
 		}
 		switch message.Meta.state {
 		case taskINIT:
+			if message.Meta.ETA > getNow().Unix() {
+				continue
+			}
 			if !c.concurrency.require(true) {
 				break
 			}
@@ -117,7 +125,7 @@ func (c *Client) scanMessages(ctx context.Context) {
 
 }
 
-func (c *Client) restoreInitMessages(ctx context.Context) {
+func (c *Client) restore(ctx context.Context) {
 	messages := make([]*Message, 0)
 	for i := len(c.messages) - 1; i >= 0; i-- {
 		message := c.messages[i]
@@ -130,7 +138,7 @@ func (c *Client) restoreInitMessages(ctx context.Context) {
 		messages = append(messages, message)
 		c.messages[i] = nil
 	}
-	if err := c.broker.restore(ctx, messages...); err != nil {
+	if err := c.broker.send(ctx, messages...); err != nil {
 		c.logger.Printf("restore messages err: %v\n", err)
 	} else {
 		c.logger.Printf("restore %d messages\n", len(messages))
@@ -147,13 +155,13 @@ func (c *Client) Start(ctx context.Context) error {
 		case <-stop:
 			signal.Stop(stop)
 			c.setState(clientSTOPPED)
-			c.restoreInitMessages(ctx)
+			c.restore(ctx)
 			return nil
 		case <-ticker.C:
-			c.scanMessages(ctx)
+			c.scan(ctx)
 		case n := <-c.concurrency.c:
 			if n < 0 {
-				c.scanMessages(ctx)
+				c.scan(ctx)
 			}
 		}
 	}

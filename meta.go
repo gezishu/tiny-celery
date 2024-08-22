@@ -12,6 +12,7 @@ type Meta struct {
 	Name      string        `json:"name"`
 	TimeLimit time.Duration `json:"timelimit"`
 	RateLimit taskRateLimit `json:"ratelimit"`
+	ETA       int64         `json:"eta"`
 	state     taskState
 	rtName    string
 }
@@ -37,6 +38,9 @@ func (m *Meta) setDefault() {
 	}
 	if m.TimeLimit < minTaskTimeLimit {
 		m.TimeLimit = defaultTaskTimeLimit
+	}
+	if m.ETA == 0 {
+		m.ETA = getNow().Unix()
 	}
 	m.state = taskINIT
 }
