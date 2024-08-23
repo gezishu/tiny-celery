@@ -154,9 +154,12 @@ func (c *Client) Start(ctx context.Context) error {
 	for {
 		select {
 		case <-stop:
-			signal.Stop(stop)
 			c.setState(clientSTOPPED)
 			c.restore(ctx)
+			// TODO 优化
+			// 尽可能让其他进程
+			time.Sleep(time.Second * 5)
+			signal.Stop(stop)
 			return nil
 		case <-ticker.C:
 			c.scan(ctx)
@@ -262,4 +265,17 @@ func (c *Client) runTaskHook(ctx context.Context, message *Message, taskHook Tas
 		return err
 	}
 	return nil
+}
+
+func (c *Client) RestoreTask(ctx context.Context, task Task) error {
+	for _, message := range c.messages {
+		if message == nil {
+			continue
+		}
+		if message.Task == task {
+			c.broker.send(ctx, message)
+			return nil
+		}
+	}
+	return ErrNoMatchedTask
 }

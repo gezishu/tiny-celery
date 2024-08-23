@@ -11,6 +11,7 @@ var (
 	ErrTaskNotRegistered = errors.New("task not registered")
 	ErrMessageIsNil      = errors.New("message is nil")
 	ErrMessageNotExists  = errors.New("message not exists")
+	ErrNoMatchedTask     = errors.New("no matched task")
 )
 
 func IsRedisNilErr(err error) bool {
