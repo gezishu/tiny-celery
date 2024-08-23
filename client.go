@@ -198,6 +198,11 @@ func (c *Client) runTask(ctx context.Context, message *Message) {
 		c.logger.Printf("invalid state %d, skip\n", state)
 		return
 	}
+	defer func() {
+		if err := recover(); err != nil {
+			c.logger.Printf("recover from panic: %v\n", err)
+		}
+	}()
 	tsc := make(chan *TaskSignal, 1)
 	ctx, cancel := context.WithDeadline(ctx, getNow().Add(message.TimeLimit))
 	defer cancel()
