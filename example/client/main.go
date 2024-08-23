@@ -12,10 +12,10 @@ func main() {
 	ctx := context.Background()
 	example.RedisClient.FlushAll(ctx)
 	client := example.GetTinyCeleryClient()
-	client.Delay(ctx, tinycelery.Tasks{
+	example.PanicIfError(client.Delay(ctx, tinycelery.Tasks{
 		&example.TestBaseTask{},
 		&example.TestHookTask{},
-	})
+	}))
 	accumulate, err := client.GetAccumulate(ctx)
 	example.PanicIfError(err)
 	fmt.Println("client.GetAccumulate", accumulate)

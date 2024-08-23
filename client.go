@@ -148,6 +148,7 @@ func (c *Client) restore(ctx context.Context) {
 func (c *Client) Start(ctx context.Context) error {
 	c.setState(clientRUNNING)
 	ticker := time.NewTicker(time.Second * 1)
+	defer ticker.Stop()
 	stop := make(chan os.Signal)
 	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT) //nolint:all
 	for {
@@ -214,6 +215,7 @@ func (c *Client) runTask(ctx context.Context, message *Message) {
 
 	var state taskState
 	var ticker = time.NewTicker(time.Millisecond * 100)
+	defer ticker.Stop()
 label:
 	for {
 		select {
