@@ -171,7 +171,7 @@ func (c *Client) Start(ctx context.Context) error {
 	}
 }
 
-func (c *Client) Delay(ctx context.Context, tasks []Task, options ...taskOption) error {
+func (c *Client) Delay(ctx context.Context, tasks Tasks, options ...taskOption) error {
 	messages := make([]*Message, 0, len(tasks))
 	for _, task := range tasks {
 		message := &Message{
