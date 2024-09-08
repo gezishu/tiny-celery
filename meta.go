@@ -15,6 +15,7 @@ type Meta struct {
 	ETA       int64         `json:"eta"`
 	state     taskState
 	rtName    string
+	err       error
 }
 
 type taskOption func(m *Meta) error

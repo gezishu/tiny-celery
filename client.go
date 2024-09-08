@@ -103,7 +103,7 @@ func (c *Client) scan(ctx context.Context) {
 			_ = c.updateMessage(ctx, i)
 		case taskFAILED:
 			// todo 增加重试逻辑
-			c.logger.Printf("task %s failed\n", message.rtName)
+			c.logger.Printf("task %s failed, err: %v\n", message.rtName, message.err)
 			_ = c.updateMessage(ctx, i)
 		case taskTIMEOUT:
 			_ = c.updateMessage(ctx, i)
@@ -157,7 +157,6 @@ func (c *Client) Start(ctx context.Context) error {
 			c.setState(clientSTOPPED)
 			c.restore(ctx)
 			// TODO 优化
-			// 尽可能让其他进程
 			time.Sleep(time.Second * 5)
 			signal.Stop(stop)
 			return nil
@@ -215,6 +214,7 @@ func (c *Client) runTask(ctx context.Context, message *Message) {
 		}()
 		tsc <- newTaskSignal(START, "")
 		if err := message.Task.Execute(ctx); err != nil {
+			message.err = err
 			tsc <- newTaskSignal(ERROR, err.Error())
 		} else {
 			tsc <- newTaskSignal(DONE, "")
