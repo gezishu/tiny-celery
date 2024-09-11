@@ -11,7 +11,7 @@ type TestRateLimitTask struct {
 	Desc string
 }
 
-func (t *TestRateLimitTask) Hooks(ctx context.Context) tinycelery.TaskHooks {
+func (t *TestRateLimitTask) Hooks(ctx context.Context) *tinycelery.TaskHooks {
 	return nil
 }
 

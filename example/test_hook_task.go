@@ -17,30 +17,30 @@ type TestHookTask struct {
 	Panic string
 }
 
-func (t *TestHookTask) Hooks(ctx context.Context) tinycelery.TaskHooks {
-	return tinycelery.TaskHooks{
-		tinycelery.BeforeCreate: func(ctx context.Context) error {
-			log.Println(t, tinycelery.BeforeCreate)
+func (t *TestHookTask) Hooks(ctx context.Context) *tinycelery.TaskHooks {
+	return &tinycelery.TaskHooks{
+		BeforeCreate: func(ctx context.Context) error {
+			log.Println(t, "before-create")
 			return nil
 		},
-		tinycelery.BeforeExecute: func(ctx context.Context) error {
-			log.Println(t, tinycelery.BeforeExecute)
+		BeforeExecute: func(ctx context.Context) error {
+			log.Println(t, "before-execute")
 			return nil
 		},
-		tinycelery.AfterSucceed: func(ctx context.Context) error {
-			log.Println(t, tinycelery.AfterSucceed)
+		AfterSucceed: func(ctx context.Context) error {
+			log.Println(t, "after-succeed")
 			return nil
 		},
-		tinycelery.AfterFailed: func(ctx context.Context) error {
-			log.Println(t, tinycelery.AfterFailed)
+		AfterFailed: func(ctx context.Context) error {
+			log.Println(t, "after-failed")
 			return nil
 		},
-		tinycelery.AfterTimeout: func(ctx context.Context) error {
-			fmt.Println(t, tinycelery.AfterTimeout)
+		AfterTimeout: func(ctx context.Context) error {
+			fmt.Println(t, "after-timeout")
 			return nil
 		},
-		tinycelery.BeforeProcessExit: func(ctx context.Context) error {
-			fmt.Println(t, tinycelery.BeforeProcessExit)
+		BeforeProcessExit: func(ctx context.Context) error {
+			fmt.Println(t, "before-process-exit")
 			return nil
 		},
 	}

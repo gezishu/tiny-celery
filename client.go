@@ -183,8 +183,11 @@ func (c *Client) Delay(ctx context.Context, tasks Tasks, options ...taskOption) 
 				return err
 			}
 		}
-		if err := c.runTaskHook(ctx, message, BeforeCreate); err != nil {
-			return err
+		var hooks = message.Task.Hooks(ctx)
+		if hooks != nil && hooks.BeforeCreate != nil {
+			if err := hooks.BeforeCreate(ctx); err != nil {
+				c.logger.Printf("run %s hook before-create err: %v\n", message.Meta.rtName, err)
+			}
 		}
 		messages = append(messages, message)
 	}
@@ -205,7 +208,12 @@ func (c *Client) runTask(ctx context.Context, message *Message) {
 	tsc := make(chan *TaskSignal, 1)
 	ctx, cancel := context.WithDeadline(ctx, getNow().Add(message.TimeLimit))
 	defer cancel()
-	_ = c.runTaskHook(ctx, message, BeforeExecute)
+	var hooks = message.Task.Hooks(ctx)
+	if hooks != nil && hooks.BeforeExecute != nil {
+		if err := hooks.BeforeExecute(ctx); err != nil {
+			c.logger.Printf("run %s hook before-execute err: %v\n", message.Meta.rtName, err)
+		}
+	}
 	go func(ctx context.Context, message *Message, tsc chan<- *TaskSignal) {
 		defer func() {
 			if err := recover(); err != nil {
@@ -229,21 +237,37 @@ label:
 		select {
 		case <-ticker.C:
 			if c.state == clientSTOPPED {
-				_ = c.runTaskHook(ctx, message, BeforeProcessExit)
+				if hooks != nil && hooks.BeforeProcessExit != nil {
+					if err := hooks.BeforeProcessExit(ctx); err != nil {
+						c.logger.Printf("run %s hook before-process-exit err: %v\n", message.Meta.rtName, err)
+					}
+				}
 				return
 			}
 		case <-ctx.Done():
 			state = taskTIMEOUT
-			_ = c.runTaskHook(ctx, message, AfterTimeout)
+			if hooks != nil && hooks.AfterTimeout != nil {
+				if err := hooks.AfterTimeout(ctx); err != nil {
+					c.logger.Printf("run %s hook timeout err: %v\n", message.Meta.rtName, err)
+				}
+			}
 			break label
 		case ts := <-tsc:
 			switch ts.Type {
 			case DONE:
 				state = taskSUCCEED
-				_ = c.runTaskHook(ctx, message, AfterSucceed)
+				if hooks != nil && hooks.AfterSucceed != nil {
+					if err := hooks.AfterSucceed(ctx); err != nil {
+						c.logger.Printf("run %s hook after-succeed err: %v\n", message.Meta.rtName, err)
+					}
+				}
 				break label
 			case ERROR, PANIC:
-				_ = c.runTaskHook(ctx, message, AfterFailed)
+				if hooks != nil && hooks.AfterFailed != nil {
+					if err := hooks.AfterFailed(ctx); err != nil {
+						c.logger.Printf("run %s hook after-failed err: %v\n", message.Meta.rtName, err)
+					}
+				}
 				state = taskFAILED
 				break label
 			}
@@ -253,23 +277,6 @@ label:
 	if err != nil {
 		c.logger.Printf("set task state err: %v\n", err)
 	}
-}
-
-func (c *Client) runTaskHook(ctx context.Context, message *Message, taskHook TaskHook) error {
-	// 调用方通常无需处理错误
-	hooks := message.Task.Hooks(ctx)
-	if len(hooks) == 0 {
-		return nil
-	}
-	f := hooks[taskHook]
-	if f == nil {
-		return nil
-	}
-	if err := f(ctx); err != nil {
-		c.logger.Printf("run %s hook %s err: %v\n", message.rtName, taskHook, err)
-		return err
-	}
-	return nil
 }
 
 func (c *Client) RestoreTask(ctx context.Context, task Task) error {
