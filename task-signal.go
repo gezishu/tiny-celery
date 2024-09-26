@@ -1,6 +1,7 @@
 package tinycelery
 
 import (
+	"context"
 	"fmt"
 	"time"
 )
@@ -34,4 +35,27 @@ func newTaskSignal(taskSignalType TaskSignalType, message string) *TaskSignal {
 		Message: message,
 		At:      getNow(),
 	}
+}
+
+var (
+	onTaskStart   = func(ctx context.Context, message *Message) {}
+	onTaskDone    = func(ctx context.Context, message *Message) {}
+	onTaskFailed  = func(ctx context.Context, message *Message) {}
+	onTaskTimeout = func(ctx context.Context, message *Message) {}
+)
+
+func SetOnTaskStart(f func(ctx context.Context, message *Message)) {
+	onTaskStart = f
+}
+
+func SetOnTaskDone(f func(ctx context.Context, message *Message)) {
+	onTaskDone = f
+}
+
+func SetOnTaskFailed(f func(ctx context.Context, message *Message)) {
+	onTaskFailed = f
+}
+
+func SetOnTaskTimeout(f func(ctx context.Context, message *Message)) {
+	onTaskTimeout = f
 }

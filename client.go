@@ -246,6 +246,7 @@ label:
 			}
 		case <-ctx.Done():
 			state = taskTIMEOUT
+			onTaskTimeout(ctx, message)
 			if hooks != nil && hooks.AfterTimeout != nil {
 				if err := hooks.AfterTimeout(ctx); err != nil {
 					c.logger.Printf("run %s hook timeout err: %v\n", message.Meta.rtName, err)
@@ -254,7 +255,10 @@ label:
 			break label
 		case ts := <-tsc:
 			switch ts.Type {
+			case START:
+				onTaskStart(ctx, message)
 			case DONE:
+				onTaskDone(ctx, message)
 				state = taskSUCCEED
 				if hooks != nil && hooks.AfterSucceed != nil {
 					if err := hooks.AfterSucceed(ctx); err != nil {
@@ -263,6 +267,7 @@ label:
 				}
 				break label
 			case ERROR, PANIC:
+				onTaskFailed(ctx, message)
 				if hooks != nil && hooks.AfterFailed != nil {
 					if err := hooks.AfterFailed(ctx); err != nil {
 						c.logger.Printf("run %s hook after-failed err: %v\n", message.Meta.rtName, err)
