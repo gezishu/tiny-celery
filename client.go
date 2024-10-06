@@ -14,6 +14,12 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+func init() {
+	logger = log.New(os.Stdout, "[tiny-celery] ", log.Ltime)
+}
+
+var logger *log.Logger
+
 type clientInitOption func(c *Client)
 
 type Client struct {
@@ -21,7 +27,6 @@ type Client struct {
 	concurrency *concurrency
 	prefetch    uint32
 	broker      *redisBroker
-	logger      *log.Logger
 	state       clientState
 	messages    []*Message
 }
@@ -43,7 +48,6 @@ func (c *Client) setState(state clientState) {
 func (c *Client) Init(rc *redis.Client, queue string, options ...clientInitOption) (*Client, error) {
 	c.concurrency = newDefaultConcurrency()
 	c.prefetch = defaultPrefetch
-	c.logger = log.New(os.Stdout, "[tiny-celery] ", log.Ltime)
 	c.broker = newDefaultRedisBroker()
 	c.broker.rc = rc
 	c.broker.queue = queue
@@ -103,11 +107,9 @@ func (c *Client) scan(ctx context.Context) {
 			_ = c.updateMessage(ctx, i)
 		case taskFAILED:
 			// todo 增加重试逻辑
-			c.logger.Printf("task %s failed, err: %v\n", message.rtName, message.err)
 			_ = c.updateMessage(ctx, i)
 		case taskTIMEOUT:
 			_ = c.updateMessage(ctx, i)
-			c.logger.Printf("task %s timeout\n", message.rtName)
 		}
 	}
 	for i := 0; i < len(c.messages); i++ {
@@ -116,7 +118,7 @@ func (c *Client) scan(ctx context.Context) {
 				if errors.Is(err, ErrMessageNotExists) {
 					break
 				} else {
-					c.logger.Printf("update message err: %v\n", err)
+					logger.Printf("update message err: %v\n", err)
 				}
 				continue
 			}
@@ -139,9 +141,9 @@ func (c *Client) restore(ctx context.Context) {
 		c.messages[i] = nil
 	}
 	if err := c.broker.send(ctx, messages...); err != nil {
-		c.logger.Printf("restore messages err: %v\n", err)
+		logger.Printf("restore messages err: %v\n", err)
 	} else {
-		c.logger.Printf("restore %d messages\n", len(messages))
+		logger.Printf("restore %d messages\n", len(messages))
 	}
 }
 
@@ -186,7 +188,7 @@ func (c *Client) Delay(ctx context.Context, tasks Tasks, options ...taskOption) 
 		var hooks = message.Task.Hooks(ctx)
 		if hooks != nil && hooks.BeforeCreate != nil {
 			if err := hooks.BeforeCreate(ctx); err != nil {
-				c.logger.Printf("run %s hook before-create err: %v\n", message.Meta.rtName, err)
+				logger.Printf("run %s hook before-create err: %v\n", message.Meta.rtName, err)
 			}
 		}
 		messages = append(messages, message)
@@ -197,12 +199,12 @@ func (c *Client) Delay(ctx context.Context, tasks Tasks, options ...taskOption) 
 func (c *Client) runTask(ctx context.Context, message *Message) {
 	defer c.concurrency.release()
 	if state := message.state; state != taskRUNNING {
-		c.logger.Printf("invalid state %d, skip\n", state)
+		logger.Printf("invalid state %d, skip\n", state)
 		return
 	}
 	defer func() {
 		if err := recover(); err != nil {
-			c.logger.Printf("recover from panic: %v\n", err)
+			logger.Printf("recover from panic: %v\n", err)
 		}
 	}()
 	tsc := make(chan *TaskSignal, 1)
@@ -211,7 +213,7 @@ func (c *Client) runTask(ctx context.Context, message *Message) {
 	var hooks = message.Task.Hooks(ctx)
 	if hooks != nil && hooks.BeforeExecute != nil {
 		if err := hooks.BeforeExecute(ctx); err != nil {
-			c.logger.Printf("run %s hook before-execute err: %v\n", message.Meta.rtName, err)
+			logger.Printf("run %s hook before-execute err: %v\n", message.Meta.rtName, err)
 		}
 	}
 	go func(ctx context.Context, message *Message, tsc chan<- *TaskSignal) {
@@ -237,19 +239,20 @@ label:
 		select {
 		case <-ticker.C:
 			if c.state == clientSTOPPED {
+				onProcessExit(ctx, message)
 				if hooks != nil && hooks.BeforeProcessExit != nil {
 					if err := hooks.BeforeProcessExit(ctx); err != nil {
-						c.logger.Printf("run %s hook before-process-exit err: %v\n", message.Meta.rtName, err)
+						logger.Printf("run %s hook before-process-exit err: %v\n", message.Meta.rtName, err)
 					}
 				}
 				return
 			}
 		case <-ctx.Done():
-			state = taskTIMEOUT
 			onTaskTimeout(ctx, message)
+			state = taskTIMEOUT
 			if hooks != nil && hooks.AfterTimeout != nil {
 				if err := hooks.AfterTimeout(ctx); err != nil {
-					c.logger.Printf("run %s hook timeout err: %v\n", message.Meta.rtName, err)
+					logger.Printf("run %s hook timeout err: %v\n", message.Meta.rtName, err)
 				}
 			}
 			break label
@@ -262,25 +265,25 @@ label:
 				state = taskSUCCEED
 				if hooks != nil && hooks.AfterSucceed != nil {
 					if err := hooks.AfterSucceed(ctx); err != nil {
-						c.logger.Printf("run %s hook after-succeed err: %v\n", message.Meta.rtName, err)
+						logger.Printf("run %s hook after-succeed err: %v\n", message.Meta.rtName, err)
 					}
 				}
 				break label
 			case ERROR, PANIC:
 				onTaskFailed(ctx, message)
+				state = taskFAILED
 				if hooks != nil && hooks.AfterFailed != nil {
 					if err := hooks.AfterFailed(ctx); err != nil {
-						c.logger.Printf("run %s hook after-failed err: %v\n", message.Meta.rtName, err)
+						logger.Printf("run %s hook after-failed err: %v\n", message.Meta.rtName, err)
 					}
 				}
-				state = taskFAILED
 				break label
 			}
 		}
 	}
 	err := message.Meta.setState(state)
 	if err != nil {
-		c.logger.Printf("set task state err: %v\n", err)
+		logger.Printf("set task state err: %v\n", err)
 	}
 }
 

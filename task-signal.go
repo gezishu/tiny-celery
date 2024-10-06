@@ -38,10 +38,17 @@ func newTaskSignal(taskSignalType TaskSignalType, message string) *TaskSignal {
 }
 
 var (
-	onTaskStart   = func(ctx context.Context, message *Message) {}
-	onTaskDone    = func(ctx context.Context, message *Message) {}
-	onTaskFailed  = func(ctx context.Context, message *Message) {}
-	onTaskTimeout = func(ctx context.Context, message *Message) {}
+	onTaskStart  = func(ctx context.Context, message *Message) {}
+	onTaskDone   = func(ctx context.Context, message *Message) {}
+	onTaskFailed = func(_ context.Context, message *Message) {
+		logger.Printf("task %s%v failed, err: %v\n", message.rtName, message.Task, message.err)
+	}
+	onTaskTimeout = func(_ context.Context, message *Message) {
+		logger.Printf("task %s%v timeout\n", message.rtName, message.Task)
+	}
+	onProcessExit = func(_ context.Context, message *Message) {
+		logger.Printf("task %s%v on process exit\n", message.rtName, message.Task)
+	}
 )
 
 func SetOnTaskStart(f func(ctx context.Context, message *Message)) {
@@ -58,4 +65,8 @@ func SetOnTaskFailed(f func(ctx context.Context, message *Message)) {
 
 func SetOnTaskTimeout(f func(ctx context.Context, message *Message)) {
 	onTaskTimeout = f
+}
+
+func SetOnProcessExit(f func(ctx context.Context, message *Message)) {
+	onProcessExit = f
 }
