@@ -45,3 +45,7 @@ func (m *Meta) setDefault() {
 	}
 	m.state = taskINIT
 }
+
+func (m *Meta) GetErr() error {
+	return m.err
+}
