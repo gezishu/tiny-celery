@@ -5,11 +5,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var tasks = tinycelery.Tasks{
-	&TestBaseTask{},
-	&TestHookTask{},
-	&TestRateLimitTask{},
-}
+var tasks = tinycelery.Tasks{}
 
 var RedisClient = redis.NewClient(&redis.Options{
 	Addr: "localhost:6379",

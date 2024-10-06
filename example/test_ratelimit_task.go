@@ -7,6 +7,10 @@ import (
 	tinycelery "github.com/gezishu/tiny-celery"
 )
 
+func init() {
+	tasks = append(tasks, &TestRateLimitTask{})
+}
+
 type TestRateLimitTask struct {
 	Desc string
 }

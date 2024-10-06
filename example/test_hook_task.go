@@ -10,6 +10,10 @@ import (
 	tinycelery "github.com/gezishu/tiny-celery"
 )
 
+func init() {
+	tasks = append(tasks, &TestHookTask{})
+}
+
 type TestHookTask struct {
 	Desc  string
 	Sleep time.Duration
